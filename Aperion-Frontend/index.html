@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f5f5f7">
+  <title>Aperion — Frontend Prototype</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell" id="app">
+    <aside class="sidebar" aria-label="Aperion navigation">
+      <div class="brand">
+        <div class="brand-mark">A</div>
+        <div>
+          <div class="brand-name">Aperion</div>
+          <div class="brand-subtitle">Focus on what matters.</div>
+        </div>
+      </div>
+
+      <button class="new-task-button glass-button" id="newTaskButton">
+        <span class="icon">＋</span>
+        <span>New Task</span>
+        <kbd>⌘N</kbd>
+      </button>
+
+      <nav class="primary-nav" id="primaryNav">
+        <button class="nav-item active" data-view="all">
+          <span class="nav-icon">☷</span><span>All Tasks</span><span class="nav-count" id="allCount"></span>
+        </button>
+        <button class="nav-item" data-view="favorites">
+          <span class="nav-icon">☆</span><span>Favorites</span><span class="nav-count" id="favoriteCount"></span>
+        </button>
+        <button class="nav-item" data-view="search">
+          <span class="nav-icon">⌕</span><span>Search</span>
+        </button>
+        <button class="nav-item" data-view="deleted">
+          <span class="nav-icon">⌫</span><span>Recently Deleted</span><span class="nav-count" id="deletedCount"></span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <span class="nav-icon">⚙</span><span>Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-section">
+        <div class="section-label">
+          <span>Projects</span>
+          <button class="mini-button" id="addProjectButton" title="New project">＋</button>
+        </div>
+        <div id="projectNav"></div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="offline-pill"><span></span> Local only</div>
+        <div class="footer-note">Your data stays on this Mac.</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow" id="viewEyebrow">APERION</div>
+          <h1 id="viewTitle">All Tasks</h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-button" id="searchButton" title="Search">⌕</button>
+          <button class="avatar-button" id="settingsButton" title="Settings">O</button>
+        </div>
+      </header>
+
+      <section class="content" id="content"></section>
+    </main>
+  </div>
+
+  <div class="command-overlay hidden" id="commandOverlay">
+    <div class="command-panel glass-panel">
+      <div class="search-line">
+        <span class="search-symbol">⌕</span>
+        <input id="globalSearch" autocomplete="off" placeholder="Search tasks, projects, sections…">
+        <kbd>ESC</kbd>
+      </div>
+      <div id="searchResults" class="search-results"></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop hidden" id="modalBackdrop">
+    <div class="task-modal glass-panel" id="taskModal" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <div class="toast hidden" id="toast">
+    <span id="toastMessage"></span>
+    <button id="toastUndo" class="toast-undo hidden">Undo</button>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
