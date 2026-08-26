@@ -1,0 +1,32 @@
+[
+    {
+        "id": "520a2d90-3291-4db7-82cb-0576b7fd7880",
+        "name": "University",
+        "description": "University work",
+        "color": "blue",
+        "icon": "graduationcap",
+        "parent_project_id": null,
+        "section_ids": []
+    },
+    {
+        "id": "1f39bc88-7062-419c-b103-abfbef2a084c",
+        "name": "Build Aperion",
+        "description": "Development of Aperion",
+        "color": "purple",
+        "icon": "hammer",
+        "parent_project_id": null,
+        "section_ids": [
+            "d426bf62-0009-4851-a084-eb486756a959",
+            "0283795e-cc0d-4d82-9688-1625dd0a869d"
+        ]
+    },
+    {
+        "id": "5dda5495-52bf-4ee8-87d0-e5be7224a87e",
+        "name": "Algorithms",
+        "description": null,
+        "color": null,
+        "icon": null,
+        "parent_project_id": "520a2d90-3291-4db7-82cb-0576b7fd7880",
+        "section_ids": []
+    }
+]
