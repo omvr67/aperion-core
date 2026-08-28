@@ -73,10 +73,10 @@
   </div>
 
   <div class="command-overlay hidden" id="commandOverlay">
-    <div class="command-panel glass-panel">
+    <div class="command-panel glass-panel" role="dialog" aria-modal="true" aria-label="Search Aperion">
       <div class="search-line">
         <span class="search-symbol">⌕</span>
-        <input id="globalSearch" autocomplete="off" placeholder="Search tasks, projects, sections…">
+        <input id="globalSearch" autocomplete="off" placeholder="Search tasks, projects, sections…" aria-label="Search tasks, projects, sections and notes">
         <kbd>ESC</kbd>
       </div>
       <div id="searchResults" class="search-results"></div>
@@ -87,7 +87,7 @@
     <div class="task-modal glass-panel" id="taskModal" role="dialog" aria-modal="true"></div>
   </div>
 
-  <div class="toast hidden" id="toast">
+  <div class="toast hidden" id="toast" role="status" aria-live="polite">
     <span id="toastMessage"></span>
     <button id="toastUndo" class="toast-undo hidden">Undo</button>
   </div>

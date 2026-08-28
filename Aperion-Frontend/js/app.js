@@ -4,6 +4,7 @@
   const STORAGE_KEY = "aperion.frontend.v1";
   const DEFAULT_DATA = {
     appearance: "system",
+    notifications: "off",
     recentSearches: [],
     projects: [
       {
@@ -45,7 +46,8 @@
     selectedProjectId: null,
     searchQuery: "",
     editingTaskId: null,
-    lastAction: null
+    lastAction: null,
+    focusedTaskId: null
   };
 
   const $ = (s, root = document) => root.querySelector(s);
@@ -79,19 +81,32 @@
   function projectById(id) { return state.data.projects.find(p => p.id === id); }
   function sectionById(project, id) { return project?.sections?.find(s => s.id === id); }
   function activeTasks() { return state.data.tasks.filter(t => !t.deleted); }
+  // Subtasks live inside their parent task's modal, not as their own row in
+  // the primary lists — this is the single place that distinction is made.
+  function topLevelTasks() { return activeTasks().filter(t => !t.parentTaskId); }
 
-  function taskCount() { return activeTasks().filter(t => !t.completed).length; }
-  function favoriteCount() { return activeTasks().filter(t => t.favorite).length; }
+  function taskCount() { return topLevelTasks().filter(t => !t.completed).length; }
+  function favoriteCount() { return topLevelTasks().filter(t => t.favorite).length; }
   function deletedCount() { return state.data.deleted.length; }
 
   function projectTasks(projectId) {
-    return activeTasks().filter(t => t.projectId === projectId);
+    return topLevelTasks().filter(t => t.projectId === projectId);
   }
 
   function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, c => ({
       "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
     }[c]));
+  }
+
+  function highlightMatch(text, query) {
+    const escaped = escapeHtml(text);
+    const q = (query || "").trim();
+    if (!q) return escaped;
+    const escapedQuery = escapeHtml(q);
+    const idx = escaped.toLowerCase().indexOf(escapedQuery.toLowerCase());
+    if (idx < 0) return escaped;
+    return escaped.slice(0, idx) + `<mark>${escaped.slice(idx, idx + escapedQuery.length)}</mark>` + escaped.slice(idx + escapedQuery.length);
   }
 
   function priorityHTML(priority) {
@@ -149,45 +164,48 @@
     const root = $("#content");
     if (state.selectedProjectId) {
       root.innerHTML = renderProjectView(projectById(state.selectedProjectId));
-      return;
-    }
-
-    if (state.view === "settings") {
+    } else if (state.view === "settings") {
       root.innerHTML = renderSettings();
-      return;
-    }
-    if (state.view === "search") {
+    } else if (state.view === "search") {
       root.innerHTML = renderSearchPage();
-      return;
-    }
-    if (state.view === "deleted") {
+    } else if (state.view === "deleted") {
       root.innerHTML = renderDeleted();
-      return;
-    }
-    if (state.view === "favorites") {
+    } else if (state.view === "favorites") {
       root.innerHTML = renderFavorites();
-      return;
+    } else {
+      root.innerHTML = renderAllTasks();
     }
-    root.innerHTML = renderAllTasks();
+    // Restart the fade-in on the freshly rendered view (subtle nav transition).
+    const inner = $(".content-inner", root);
+    if (inner) {
+      inner.classList.remove("view-enter");
+      void inner.offsetWidth;
+      inner.classList.add("view-enter");
+    }
   }
 
   function taskRow(task) {
     const project = projectById(task.projectId);
     const section = sectionById(project, task.sectionId);
+    const subtasks = state.data.tasks.filter(t => t.parentTaskId === task.id);
+    const subtaskBadge = subtasks.length
+      ? `<span class="subtask-progress" title="${subtasks.filter(s=>s.completed).length} of ${subtasks.length} subtasks done">◐ ${subtasks.filter(s=>s.completed).length}/${subtasks.length}</span>`
+      : "";
     return `
-      <div class="task-row ${task.completed ? "completed" : ""}" draggable="true" data-task-id="${task.id}">
-        <button class="check ${task.completed ? "done" : ""}" data-complete="${task.id}" aria-label="Toggle completion"></button>
+      <div class="task-row ${task.completed ? "completed" : ""} ${state.focusedTaskId === task.id ? "focused" : ""}" draggable="true" data-task-id="${task.id}">
+        <button class="check ${task.completed ? "done" : ""}" data-complete="${task.id}" aria-label="Toggle completion" aria-pressed="${task.completed}"></button>
         <div class="task-main" data-open-task="${task.id}">
           <div class="task-title">${escapeHtml(task.title)}</div>
           <div class="task-meta">
             ${priorityHTML(task.priority)}
+            ${subtaskBadge}
             ${task.notes ? `<span>${escapeHtml(task.notes.slice(0,70))}</span>` : ""}
             ${project ? `<span>${escapeHtml(project.name)}</span>` : ""}
             ${section ? `<span>· ${escapeHtml(section.name)}</span>` : ""}
           </div>
         </div>
         <div class="task-actions">
-          <button class="star ${task.favorite ? "active" : ""}" data-favorite="${task.id}" title="Favorite">${task.favorite ? "★" : "☆"}</button>
+          <button class="star ${task.favorite ? "active" : ""}" data-favorite="${task.id}" title="Favorite" aria-pressed="${task.favorite}">${task.favorite ? "★" : "☆"}</button>
         </div>
       </div>`;
   }
@@ -211,8 +229,8 @@
   }
 
   function renderAllTasks() {
-    const tasks = activeTasks().filter(t => !t.completed);
-    const completed = activeTasks().filter(t => t.completed);
+    const tasks = topLevelTasks().filter(t => !t.completed);
+    const completed = topLevelTasks().filter(t => t.completed);
     return `<div class="content-inner">
       <div class="view-intro">
         <div><div class="view-description">${taskCount()} active task${taskCount()===1?"":"s"} across your workspace.</div></div>
@@ -224,7 +242,7 @@
   }
 
   function renderFavorites() {
-    const tasks = activeTasks().filter(t => t.favorite).sort((a,b)=>a.order-b.order);
+    const tasks = topLevelTasks().filter(t => t.favorite).sort((a,b)=>a.order-b.order);
     const projects = state.data.projects.filter(p => p.favorite);
     return `<div class="content-inner">
       <div class="view-intro"><div><div class="view-description">Your most important work, without another layer of complexity.</div></div></div>
@@ -278,32 +296,55 @@
   function renderSearchResults(query) {
     if (!query.trim()) {
       const recent = state.data.recentSearches || [];
-      return recent.length ? `<div class="section-heading"><span>Recent searches</span><span class="line"></span></div>${recent.map(s=>`<button class="search-result" data-recent-search="${escapeHtml(s)}"><span class="result-kind">RECENT</span><div class="result-title">${escapeHtml(s)}</div></button>`).join("")}` : emptyState("⌕","Search Aperion","Start typing to find tasks, projects, sections and notes.");
+      return recent.length ? `<div class="section-heading"><span>Recent searches</span><span class="line"></span></div>${recent.map(s=>`
+        <div class="recent-search-row">
+          <button class="search-result" data-recent-search="${escapeHtml(s)}"><span class="result-kind">RECENT</span><div class="result-title">${escapeHtml(s)}</div></button>
+          <button class="remove-recent" data-remove-recent="${escapeHtml(s)}" title="Remove from recent searches" aria-label="Remove ‘${escapeHtml(s)}’ from recent searches">×</button>
+        </div>`).join("")}` : emptyState("⌕","Search Aperion","Start typing to find tasks, projects, sections and notes.");
     }
-    const q = query.toLowerCase();
-    const results = [];
+    const q = query.trim().toLowerCase();
+    const taskResults = [], projectResults = [], sectionResults = [];
     activeTasks().forEach(t => {
-      if ([t.title,t.notes].some(v=>(v||"").toLowerCase().includes(q))) results.push({kind:"Task",title:t.title,detail:projectById(t.projectId)?.name || "Unassigned",task:t});
-      if (t.parentTaskId && (t.title||"").toLowerCase().includes(q)) {}
+      if ([t.title,t.notes].some(v=>(v||"").toLowerCase().includes(q))) {
+        taskResults.push({
+          kind: t.parentTaskId ? "Subtask" : "Task",
+          title: t.title,
+          detail: projectById(t.projectId)?.name || "Unassigned",
+          task: t
+        });
+      }
     });
     state.data.projects.forEach(p => {
-      if (p.name.toLowerCase().includes(q) || (p.description||"").toLowerCase().includes(q)) results.push({kind:"Project",title:p.name,detail:p.description||"",project:p});
-      p.sections.forEach(s => { if (s.name.toLowerCase().includes(q)) results.push({kind:"Section",title:s.name,detail:p.name,project:p}); });
+      if (p.name.toLowerCase().includes(q) || (p.description||"").toLowerCase().includes(q)) projectResults.push({kind:"Project",title:p.name,detail:p.description||"",project:p});
+      p.sections.forEach(s => { if (s.name.toLowerCase().includes(q)) sectionResults.push({kind:"Section",title:s.name,detail:p.name,project:p}); });
     });
-    if (!results.length) return emptyState("⌕","No matches","Try another word or a task title.");
-    return `<div class="section-heading"><span>Results</span><span class="line"></span><span>${results.length}</span></div>
-      ${results.map(r=>`<div class="search-result" data-result-kind="${r.kind}" data-result-id="${r.task?.id || r.project?.id || ""}">
-        <span class="result-kind">${r.kind}</span><div><div class="result-title">${escapeHtml(r.title)}</div><div class="result-detail">${escapeHtml(r.detail)}</div></div>
-      </div>`).join("")}`;
+    const groups = [
+      { label: "Tasks", results: taskResults },
+      { label: "Projects", results: projectResults },
+      { label: "Sections", results: sectionResults }
+    ].filter(g => g.results.length);
+    if (!groups.length) return emptyState("⌕","No matches","Try another word or a task title.");
+    return groups.map(g => `
+      <div class="section-heading"><span>${g.label}</span><span class="line"></span><span>${g.results.length}</span></div>
+      ${g.results.map(r=>`<button class="search-result" data-result-kind="${r.kind}" data-result-id="${r.task?.id || r.project?.id || ""}">
+        <span class="result-kind">${r.kind}</span>
+        <div><div class="result-title">${highlightMatch(r.title, query)}</div>${r.detail ? `<div class="result-detail">${highlightMatch(r.detail, query)}</div>` : ""}</div>
+      </button>`).join("")}`).join("");
   }
 
   function renderDeleted() {
     const items = state.data.deleted;
     return `<div class="content-inner">
-      <div class="view-intro"><div><div class="view-description">Deleted items stay recoverable for 30 days in the final app.</div></div></div>
+      <div class="view-intro">
+        <div><div class="view-description">Deleted items stay recoverable for 30 days in the final app.</div></div>
+        ${items.length ? `<button class="add-inline" data-action="empty-trash">Empty Trash</button>` : ""}
+      </div>
       ${items.length ? items.map(item => `<div class="task-row">
         <div class="check"></div><div class="task-main"><div class="task-title">${escapeHtml(item.title || item.name)}</div><div class="task-meta">Deleted ${formatRelative(item.deletedAt)}</div></div>
-        <div class="task-actions" style="opacity:1"><button class="star" data-restore="${item.id}" title="Restore">↩</button></div>
+        <div class="task-actions" style="opacity:1">
+          <button class="star" data-restore="${item.id}" title="Restore">↩</button>
+          <button class="star" data-permanent-delete="${item.id}" title="Delete permanently">⊗</button>
+        </div>
       </div>`).join("") : emptyState("⌫","Recently Deleted is empty","Deleted tasks and projects will appear here.")}
     </div>`;
   }
@@ -316,6 +357,11 @@
           <div class="setting-title">Appearance</div>
           <div class="setting-description">Choose how the prototype follows the system appearance.</div>
           <div class="setting-row"><span>Theme</span><select class="select" id="appearanceSelect"><option value="system" ${state.data.appearance==="system"?"selected":""}>System</option><option value="light" ${state.data.appearance==="light"?"selected":""}>Light</option><option value="dark" ${state.data.appearance==="dark"?"selected":""}>Dark</option></select></div>
+        </div>
+        <div class="setting-card">
+          <div class="setting-title">Notifications</div>
+          <div class="setting-description">A single, lightweight reminder about tasks you still have open.</div>
+          <div class="setting-row"><span>Remind me</span><select class="select" id="notificationSelect"><option value="off" ${state.data.notifications==="off"?"selected":""}>Off</option><option value="daily" ${state.data.notifications==="daily"?"selected":""}>Once a day</option><option value="weekdays" ${state.data.notifications==="weekdays"?"selected":""}>Weekdays only</option></select></div>
         </div>
         <div class="setting-card">
           <div class="setting-title">Local storage</div>
@@ -382,11 +428,23 @@
     $$(".check", $("#taskModal")).forEach(btn => {
       if (btn.dataset.complete) btn.onclick = () => toggleComplete(btn.dataset.complete);
     });
+    // Return commits instantly, from either the title field or the quick
+    // "add a subtask" field — no reaching for the Save button required.
+    $("#modalTitle").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); saveTaskFromModal(task); } };
+    $("#modalTitle").addEventListener("input", () => $("#modalTitle").classList.remove("field-error"));
+    $("#newSubtask")?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); saveTaskFromModal(task); } });
   }
 
   function saveTaskFromModal(existing) {
     const title = $("#modalTitle").value.trim();
-    if (!title) { $("#modalTitle").focus(); return; }
+    if (!title) {
+      const input = $("#modalTitle");
+      input.classList.remove("field-error");
+      void input.offsetWidth;
+      input.classList.add("field-error");
+      input.focus();
+      return;
+    }
 
     const projectId = $("#modalProject").value || null;
     const sectionId = projectId ? ($("#modalSection").value || null) : null;
@@ -441,6 +499,7 @@
     state.data.tasks.splice(index,1);
     state.data.deleted.unshift({...task,deletedAt:Date.now(),type:"task"});
     state.lastAction = {type:"restoreTask", task:clone(task)};
+    if (state.focusedTaskId === id) state.focusedTaskId = null;
     persist(); render(); showToast("Moved to Recently Deleted", true);
   }
 
@@ -454,6 +513,23 @@
       state.data.tasks.push(item);
     }
     persist(); render(); showToast("Restored");
+  }
+
+  // Recently Deleted items are only ever removed for good with an explicit,
+  // separate confirmation — recoverable moves (deleteTask above) never ask.
+  function permanentlyDeleteItem(id) {
+    const item = state.data.deleted.find(x=>x.id===id);
+    if(!item) return;
+    if(!confirm(`Permanently delete “${item.title || item.name}”? This can't be undone.`)) return;
+    state.data.deleted = state.data.deleted.filter(x=>x.id!==id);
+    persist(); render(); showToast("Deleted permanently");
+  }
+
+  function emptyTrash() {
+    if(!state.data.deleted.length) return;
+    if(!confirm("Permanently delete everything in Recently Deleted? This can't be undone.")) return;
+    state.data.deleted = [];
+    persist(); render(); showToast("Recently Deleted emptied");
   }
 
   function addProject() {
@@ -478,6 +554,76 @@
     persist(); render(); showToast("Project updated");
   }
 
+  // --- Context menus (right-click on a task or project row) ---------------
+
+  function taskContextMenuSections(task) {
+    const projectOptions = [{ id: "", name: "No Project" }, ...state.data.projects];
+    return [
+      { key: "actions", items: [
+        { label: task.completed ? "Mark as Not Done" : "Mark as Done", onClick: () => toggleComplete(task.id) },
+        { label: task.favorite ? "Remove from Favorites" : "Add to Favorites", onClick: () => toggleFavorite(task.id) },
+        { label: "Edit…", onClick: () => openTaskModal(task.id) }
+      ]},
+      { key: "move", label: "Move to", scroll: true, items: projectOptions.map(p => ({
+        label: p.name,
+        active: (task.projectId || "") === p.id,
+        onClick: () => moveTaskToProject(task.id, p.id || null)
+      })) },
+      { key: "danger", items: [
+        { label: "Delete", danger: true, onClick: () => deleteTask(task.id) }
+      ]}
+    ];
+  }
+
+  function projectContextMenuSections(project) {
+    return [
+      { key: "actions", items: [
+        { label: "New Task", onClick: () => { state.selectedProjectId = project.id; openTaskModal(); } },
+        { label: "Edit Project…", onClick: () => editProject(project.id) }
+      ]}
+    ];
+  }
+
+  function closeContextMenu() {
+    const menu = document.querySelector(".context-menu");
+    if (menu) menu.remove();
+    document.removeEventListener("mousedown", handleContextMenuOutsideClick, true);
+  }
+
+  function handleContextMenuOutsideClick(e) {
+    if (!e.target.closest(".context-menu")) closeContextMenu();
+  }
+
+  function openContextMenu(x, y, sections) {
+    closeContextMenu();
+    const menu = document.createElement("div");
+    menu.className = "context-menu glass-panel";
+    menu.setAttribute("role", "menu");
+    menu.innerHTML = sections.map((section, si) => `
+      ${si > 0 ? `<div class="context-menu-divider"></div>` : ""}
+      ${section.label ? `<div class="context-menu-label">${escapeHtml(section.label)}</div>` : ""}
+      <div class="${section.scroll ? "context-menu-projects" : ""}">
+        ${section.items.map((item, ii) => `
+          <button class="context-menu-item ${item.danger ? "danger" : ""}" role="menuitem" data-menu-key="${section.key}-${ii}">
+            <span>${escapeHtml(item.label)}</span>${item.active ? `<span class="check-mark">✓</span>` : ""}
+          </button>`).join("")}
+      </div>`).join("");
+    document.body.appendChild(menu);
+
+    const vw = window.innerWidth, vh = window.innerHeight;
+    menu.style.left = Math.max(8, Math.min(x, vw - menu.offsetWidth - 8)) + "px";
+    menu.style.top = Math.max(8, Math.min(y, vh - menu.offsetHeight - 8)) + "px";
+
+    sections.forEach(section => {
+      section.items.forEach((item, ii) => {
+        const el = menu.querySelector(`[data-menu-key="${section.key}-${ii}"]`);
+        if (el) el.onclick = () => { closeContextMenu(); item.onClick(); };
+      });
+    });
+
+    setTimeout(() => document.addEventListener("mousedown", handleContextMenuOutsideClick, true), 0);
+  }
+
   function showToast(message, undo=false) {
     $("#toastMessage").textContent = message;
     $("#toastUndo").classList.toggle("hidden", !undo);
@@ -497,13 +643,28 @@
 
   function renderCommandResults() {
     $("#searchResults").innerHTML = renderSearchResults($("#globalSearch").value);
-    $$("#searchResults .search-result").forEach(el => {
+    $$("#searchResults .search-result[data-result-id]").forEach(el => {
       el.onclick = () => {
         const id = el.dataset.resultId;
-        if(el.dataset.resultKind==="Task") { closeSearch(); openTaskModal(id); }
+        if(el.dataset.resultKind==="Task" || el.dataset.resultKind==="Subtask") { closeSearch(); openTaskModal(id); }
         else if(id) { closeSearch(); state.selectedProjectId=id; state.view="all"; state.searchQuery=""; render(); }
       };
     });
+    $$("#searchResults [data-recent-search]").forEach(el => {
+      el.onclick = () => {
+        $("#globalSearch").value = el.dataset.recentSearch;
+        state.searchQuery = el.dataset.recentSearch;
+        renderCommandResults();
+      };
+    });
+    $$("#searchResults [data-remove-recent]").forEach(el => {
+      el.onclick = e => { e.stopPropagation(); removeRecentSearch(el.dataset.removeRecent); renderCommandResults(); };
+    });
+  }
+
+  function removeRecentSearch(value) {
+    state.data.recentSearches = (state.data.recentSearches || []).filter(s => s !== value);
+    persist();
   }
 
   function bindGlobalInteractions() {
@@ -522,45 +683,109 @@
         state.view = "all";
         render();
       };
+      el.oncontextmenu = e => {
+        e.preventDefault();
+        const project = projectById(el.dataset.project);
+        if (project) openContextMenu(e.clientX, e.clientY, projectContextMenuSections(project));
+      };
+      // Drag a task onto a project row (sidebar or sub-project) to re-home it.
+      el.ondragover = e => { e.preventDefault(); el.classList.add("drop-target-project"); };
+      el.ondragleave = () => el.classList.remove("drop-target-project");
+      el.ondrop = e => {
+        e.preventDefault();
+        el.classList.remove("drop-target-project");
+        const taskId = e.dataTransfer.getData("text/plain");
+        if (taskId) moveTaskToProject(taskId, el.dataset.project);
+      };
     });
 
     $$("[data-action='new-task']").forEach(el => el.onclick = () => openTaskModal());
+    $$("[data-action='empty-trash']").forEach(el => el.onclick = emptyTrash);
     $("#newTaskButton").onclick = () => openTaskModal();
     $("#addProjectButton").onclick = addProject;
     $("#searchButton").onclick = openSearch;
     $("#settingsButton").onclick = () => { state.selectedProjectId=null; state.view="settings"; render(); };
 
+    // A task row's own drop target for favoriting via drag.
+    const favoritesNav = $('.nav-item[data-view="favorites"]');
+    if (favoritesNav) {
+      favoritesNav.ondragover = e => { e.preventDefault(); favoritesNav.classList.add("drop-target-project"); };
+      favoritesNav.ondragleave = () => favoritesNav.classList.remove("drop-target-project");
+      favoritesNav.ondrop = e => {
+        e.preventDefault();
+        favoritesNav.classList.remove("drop-target-project");
+        const taskId = e.dataTransfer.getData("text/plain");
+        const task = taskId && state.data.tasks.find(t => t.id === taskId);
+        if (task && !task.favorite) { task.favorite = true; persist(); render(); showToast("Added to Favorites"); }
+      };
+    }
+
     $$("[data-complete]").forEach(el => el.onclick = e => { e.stopPropagation(); toggleComplete(el.dataset.complete); });
     $$("[data-favorite]").forEach(el => el.onclick = e => { e.stopPropagation(); toggleFavorite(el.dataset.favorite); });
-    $$("[data-open-task]").forEach(el => el.onclick = () => openTaskModal(el.dataset.openTask));
     $$("[data-edit-project]").forEach(el => el.onclick = () => editProject(el.dataset.editProject));
     $$("[data-restore]").forEach(el => el.onclick = () => restoreItem(el.dataset.restore));
+    $$("[data-permanent-delete]").forEach(el => el.onclick = () => permanentlyDeleteItem(el.dataset.permanentDelete));
+
+    // Single click opens the task; a genuine double-click renames it inline
+    // instead — the short delay is what lets the two be told apart.
+    let openTaskTimer = null;
+    $$("[data-open-task]").forEach(el => {
+      el.onclick = () => {
+        clearTimeout(openTaskTimer);
+        openTaskTimer = setTimeout(() => openTaskModal(el.dataset.openTask), 220);
+      };
+      el.ondblclick = () => {
+        clearTimeout(openTaskTimer);
+        const titleEl = $(".task-title", el);
+        if (titleEl) enableInlineTitleEdit(el.dataset.openTask, titleEl);
+      };
+    });
 
     $$(".task-row[draggable='true']").forEach(row => {
-      row.addEventListener("dragstart", e => { e.dataTransfer.setData("text/plain", row.dataset.taskId); row.classList.add("dragging"); });
-      row.addEventListener("dragend", () => row.classList.remove("dragging"));
-      row.addEventListener("dragover", e => { e.preventDefault(); row.classList.add("drop-target"); });
-      row.addEventListener("dragleave", () => row.classList.remove("drop-target"));
+      row.addEventListener("mousedown", () => setFocusedTask(row.dataset.taskId));
+      row.oncontextmenu = e => {
+        e.preventDefault();
+        const task = state.data.tasks.find(t => t.id === row.dataset.taskId);
+        if (task) openContextMenu(e.clientX, e.clientY, taskContextMenuSections(task));
+      };
+      row.addEventListener("dragstart", e => {
+        e.dataTransfer.setData("text/plain", row.dataset.taskId);
+        e.dataTransfer.effectAllowed = "move";
+        row.classList.add("dragging");
+      });
+      row.addEventListener("dragend", () => row.classList.remove("dragging", "drop-before", "drop-after"));
+      row.addEventListener("dragover", e => {
+        e.preventDefault();
+        const rect = row.getBoundingClientRect();
+        const before = e.clientY - rect.top < rect.height / 2;
+        row.classList.toggle("drop-before", before);
+        row.classList.toggle("drop-after", !before);
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after"));
       row.addEventListener("drop", e => {
-        e.preventDefault(); row.classList.remove("drop-target");
-        reorderTask(e.dataTransfer.getData("text/plain"), row.dataset.taskId);
+        e.preventDefault();
+        const before = row.classList.contains("drop-before");
+        row.classList.remove("drop-before", "drop-after");
+        reorderTask(e.dataTransfer.getData("text/plain"), row.dataset.taskId, before);
       });
     });
 
     $("#pageSearch")?.addEventListener("input", e => {
       state.searchQuery = e.target.value;
-      $("#pageSearchResults").innerHTML = renderSearchResults(state.searchQuery);
-      if(state.searchQuery.trim()) {
+      if (state.searchQuery.trim()) {
         state.data.recentSearches = [state.searchQuery.trim(), ...(state.data.recentSearches||[]).filter(x=>x!==state.searchQuery.trim())].slice(0,6);
         persist();
       }
+      $("#pageSearchResults").innerHTML = renderSearchResults(state.searchQuery);
+      bindPageSearchResults();
     });
-    $$("[data-recent-search]").forEach(el => {
-      el.onclick = () => { state.searchQuery=el.dataset.recentSearch; render(); setTimeout(()=>$("#pageSearch")?.focus(),0); };
-    });
+    bindPageSearchResults();
 
     $("#appearanceSelect")?.addEventListener("change", e => {
       state.data.appearance=e.target.value; persist(); applyAppearance();
+    });
+    $("#notificationSelect")?.addEventListener("change", e => {
+      state.data.notifications = e.target.value; persist(); showToast("Notification setting saved");
     });
     $("#resetData")?.addEventListener("click", () => {
       if(confirm("Reset the frontend prototype to its original demo data?")) {
@@ -569,7 +794,28 @@
     });
   }
 
-  function reorderTask(sourceId, targetId) {
+  function bindPageSearchResults() {
+    $$("#pageSearchResults .search-result[data-result-id]").forEach(el => {
+      el.onclick = () => {
+        const id = el.dataset.resultId;
+        if (el.dataset.resultKind === "Task" || el.dataset.resultKind === "Subtask") { openTaskModal(id); }
+        else if (id) { state.selectedProjectId = id; state.view = "all"; state.searchQuery = ""; render(); }
+      };
+    });
+    $$("#pageSearchResults [data-recent-search]").forEach(el => {
+      el.onclick = () => { state.searchQuery = el.dataset.recentSearch; render(); setTimeout(()=>$("#pageSearch")?.focus(),0); };
+    });
+    $$("#pageSearchResults [data-remove-recent]").forEach(el => {
+      el.onclick = e => {
+        e.stopPropagation();
+        removeRecentSearch(el.dataset.removeRecent);
+        $("#pageSearchResults").innerHTML = renderSearchResults(state.searchQuery);
+        bindPageSearchResults();
+      };
+    });
+  }
+
+  function reorderTask(sourceId, targetId, before = false) {
     if(sourceId===targetId) return;
     const source=state.data.tasks.find(t=>t.id===sourceId), target=state.data.tasks.find(t=>t.id===targetId);
     if(!source||!target) return;
@@ -577,10 +823,54 @@
       source.projectId=target.projectId; source.sectionId=target.sectionId;
     }
     const siblings=state.data.tasks.filter(t=>t.projectId===target.projectId && t.sectionId===target.sectionId && t.parentTaskId===target.parentTaskId && t.id!==source.id).sort((a,b)=>a.order-b.order);
-    const targetIndex=siblings.findIndex(t=>t.id===target.id);
+    let targetIndex=siblings.findIndex(t=>t.id===target.id);
+    if (!before) targetIndex += 1;
     siblings.splice(Math.max(0,targetIndex),0,source);
     siblings.forEach((t,i)=>t.order=i);
     persist(); render(); showToast("Task moved");
+  }
+
+  function moveTaskToProject(taskId, projectId) {
+    const task = state.data.tasks.find(t => t.id === taskId);
+    if (!task) return;
+    const normalizedId = projectId || null;
+    if (task.projectId === normalizedId) return;
+    task.projectId = normalizedId;
+    task.sectionId = null;
+    persist(); render();
+    showToast(normalizedId ? `Moved to ${projectById(normalizedId)?.name || "project"}` : "Removed from project");
+  }
+
+  function enableInlineTitleEdit(taskId, titleEl) {
+    const task = state.data.tasks.find(t => t.id === taskId);
+    if (!task || !titleEl || !titleEl.isConnected) return;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "inline-edit-input";
+    input.value = task.title;
+    titleEl.replaceWith(input);
+    input.focus();
+    input.select();
+    const commit = () => {
+      const value = input.value.trim();
+      if (value && value !== task.title) { task.title = value; persist(); }
+      render();
+    };
+    input.addEventListener("keydown", e => {
+      e.stopPropagation();
+      if (e.key === "Enter") { e.preventDefault(); commit(); }
+      else if (e.key === "Escape") { e.preventDefault(); render(); }
+    });
+    input.addEventListener("click", e => e.stopPropagation());
+    input.addEventListener("blur", commit);
+  }
+
+  function setFocusedTask(id) {
+    if (state.focusedTaskId === id) return;
+    const prev = state.focusedTaskId;
+    state.focusedTaskId = id;
+    if (prev) $(`.task-row[data-task-id="${prev}"]`)?.classList.remove("focused");
+    if (id) $(`.task-row[data-task-id="${id}"]`)?.classList.add("focused");
   }
 
   function applyAppearance() {
@@ -594,9 +884,38 @@
   function bindKeyboard() {
     document.addEventListener("keydown", e => {
       const cmd = e.metaKey || e.ctrlKey;
-      if(cmd && e.key.toLowerCase()==="n") { e.preventDefault(); openTaskModal(); }
-      if(cmd && e.key.toLowerCase()==="k") { e.preventDefault(); openSearch(); }
-      if(e.key==="Escape") { closeSearch(); closeModal(); }
+      if(cmd && e.key.toLowerCase()==="n") { e.preventDefault(); openTaskModal(); return; }
+      if(cmd && e.key.toLowerCase()==="k") { e.preventDefault(); openSearch(); return; }
+      if(e.key==="Escape") { closeSearch(); closeModal(); closeContextMenu(); return; }
+
+      // List keyboard navigation (↑/↓ select, Enter opens, Space toggles done,
+      // F favorites, Backspace/Delete removes) — only when the user isn't
+      // typing anywhere and no overlay is covering the list.
+      const typing = ["INPUT","TEXTAREA","SELECT"].includes(document.activeElement?.tagName);
+      const overlayOpen = !$("#modalBackdrop").classList.contains("hidden")
+        || !$("#commandOverlay").classList.contains("hidden")
+        || document.querySelector(".context-menu");
+      if (typing || overlayOpen || cmd || e.altKey) return;
+
+      const rows = $$(".task-row[data-task-id]");
+      if (!rows.length) return;
+      const ids = rows.map(r => r.dataset.taskId);
+
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        let index = ids.indexOf(state.focusedTaskId);
+        index = e.key === "ArrowDown" ? Math.min(ids.length - 1, index + 1) : Math.max(0, index - 1);
+        setFocusedTask(ids[index]);
+        $(`.task-row[data-task-id="${ids[index]}"]`)?.scrollIntoView?.({ block: "nearest" });
+      } else if (e.key === "Enter" && state.focusedTaskId) {
+        e.preventDefault(); openTaskModal(state.focusedTaskId);
+      } else if (e.key === " " && state.focusedTaskId) {
+        e.preventDefault(); toggleComplete(state.focusedTaskId);
+      } else if (e.key.toLowerCase() === "f" && state.focusedTaskId) {
+        e.preventDefault(); toggleFavorite(state.focusedTaskId);
+      } else if ((e.key === "Backspace" || e.key === "Delete") && state.focusedTaskId) {
+        e.preventDefault(); deleteTask(state.focusedTaskId);
+      }
     });
     $("#commandOverlay").addEventListener("click", e => { if(e.target.id==="commandOverlay") closeSearch(); });
     $("#globalSearch").addEventListener("input", e => { state.searchQuery=e.target.value; renderCommandResults(); });
